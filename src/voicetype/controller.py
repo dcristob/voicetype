@@ -69,22 +69,26 @@ class Controller:
         if self._sm.state is not State.LISTENING:
             return
         self._sm.transition(State.TRANSCRIBING)
-        audio = self.recorder.stop()
+        # recorder.stop() is inside the guarded block so that any failure
+        # (transcription, injection, or even stopping the stream) still routes
+        # the daemon back to IDLE rather than leaving it stuck in TRANSCRIBING.
         try:
+            audio = self.recorder.stop()
             text = self.transcriber.transcribe(audio, self.language)
-        except Exception as exc:  # transcription failure -> notify, reset
-            self._sm.transition(State.ERROR)
-            self._notify("Transcription failed", str(exc))
-            self._sm.transition(State.IDLE)
+        except Exception as exc:
+            self._fail("Transcription failed", exc)
             return
         if text:
             try:
                 self.injector.type_text(text)
             except Exception as exc:
-                self._sm.transition(State.ERROR)
-                self._notify("Injection failed", str(exc))
-                self._sm.transition(State.IDLE)
+                self._fail("Injection failed", exc)
                 return
+        self._sm.transition(State.IDLE)
+
+    def _fail(self, title: str, exc: Exception) -> None:
+        self._sm.transition(State.ERROR)
+        self._notify(title, str(exc))
         self._sm.transition(State.IDLE)
 
     def _notify(self, title: str, body: str) -> None:

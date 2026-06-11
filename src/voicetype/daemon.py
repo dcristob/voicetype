@@ -41,6 +41,7 @@ class Daemon:
             get_language=lambda: self.controller.language,
         )
         self._stopping = asyncio.Event()
+        self._finishing = False
 
     # --- state/tray ---
     def _on_state_change(self, old: State, new: State) -> None:
@@ -48,11 +49,18 @@ class Daemon:
 
     # --- audio frame feeding (runs in the sounddevice thread) ---
     def _on_frame(self, frame) -> None:
+        # Once end-of-utterance is detected the silence tracker keeps reporting
+        # True for every subsequent silent frame; the flag ensures finish() is
+        # scheduled exactly once per utterance.
+        if self._finishing:
+            return
         if self.controller.feed_frame(frame) and self._loop is not None:
+            self._finishing = True
             self._loop.call_soon_threadsafe(self.controller.finish)
 
     def _start_listening(self) -> None:
         # Re-route the recorder callback through the daemon so frames hit VAD.
+        self._finishing = False
         self.controller._start()  # transitions + starts recorder
         # Replace the no-op callback with our frame feeder.
         self.recorder._on_frame = self._on_frame

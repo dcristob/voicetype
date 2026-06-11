@@ -1,0 +1,15 @@
+[Unit]
+Description=VoiceType dictation daemon
+After=graphical-session.target ydotoold.service
+Wants=ydotoold.service
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+Environment=YDOTOOL_SOCKET=%t/.ydotool_socket
+ExecStart=%h/.local/bin/voicetyped
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target

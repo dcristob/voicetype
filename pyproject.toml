@@ -19,6 +19,9 @@ voicetyped = "voicetype.daemon:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+# NVIDIA GPU acceleration: CTranslate2 needs the CUDA 12 cuBLAS/cuDNN runtime.
+# Install with:  uv pip install -e ".[cuda]"   (or  uv tool install ".[cuda]")
+cuda = ["nvidia-cublas-cu12", "nvidia-cudnn-cu12"]
 
 [build-system]
 requires = ["hatchling"]

@@ -20,7 +20,21 @@ via faster-whisper, with automatic Spanish/English detection.
   extension, which also provides the StatusNotifierWatcher the tray registers with).
 - PipeWire or PulseAudio, a microphone.
 - `ydotool` + `ydotoold` (text injection).
-- NVIDIA GPU optional; falls back to CPU.
+- NVIDIA GPU optional; falls back to CPU automatically.
+
+### GPU acceleration (NVIDIA)
+
+Install the CUDA runtime libraries CTranslate2 needs:
+
+```bash
+uv pip install -e ".[cuda]"   # nvidia-cublas-cu12 + nvidia-cudnn-cu12
+```
+
+The transcriber picks the best working option automatically: it tries the
+configured compute type on the GPU, then plain `int8` on the GPU (older cards
+like the GTX 10xx / Pascal series support `int8` but not `int8_float16`), then
+falls back to CPU `int8`. So `compute_type = "int8_float16"` is safe everywhere
+— a Pascal GPU quietly runs `int8` on the GPU instead of dropping to CPU.
 
 ## Install
 

@@ -14,16 +14,33 @@ class Transcriber:
         self._model: WhisperModel | None = None
 
     def _load(self) -> WhisperModel:
-        device = self.device if self.device != "auto" else "cuda"
-        try:
-            return WhisperModel(self.model_name, device, self.compute_type)
-        except RuntimeError as exc:
-            if "cuda" in str(exc).lower() or "out of memory" in str(exc).lower():
-                # Fall back to CPU int8.
-                self.device = "cpu"
-                self.compute_type = "int8"
-                return WhisperModel(self.model_name, "cpu", "int8")
-            raise
+        primary = self.device if self.device != "auto" else "cuda"
+        # Try progressively more conservative options:
+        #   1. the configured device + compute type
+        #   2. the same GPU with plain int8 (older GPUs like Pascal/GTX 10xx
+        #      reject int8_float16/float16 but support int8)
+        #   3. CPU int8 as a universal fallback
+        # NOTE: device/compute_type MUST be keyword args — WhisperModel's 3rd
+        # positional parameter is device_index, not compute_type.
+        attempts = []
+        if primary != "cpu":
+            attempts.append((primary, self.compute_type))
+            if self.compute_type != "int8":
+                attempts.append((primary, "int8"))
+        attempts.append(("cpu", "int8"))
+
+        last_error: Exception | None = None
+        for device, compute_type in attempts:
+            try:
+                model = WhisperModel(
+                    self.model_name, device=device, compute_type=compute_type
+                )
+                self.device = device
+                self.compute_type = compute_type
+                return model
+            except Exception as exc:
+                last_error = exc
+        raise last_error
 
     def ensure_loaded(self) -> None:
         if self._model is None:

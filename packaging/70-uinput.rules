@@ -1,1 +1,5 @@
-KERNEL=="uinput", GROUP="input", MODE="0660", OPTIONS+="static_node=uinput"
+# Grant the active desktop user access to /dev/uinput so ydotoold can run
+# without root. TAG+="uaccess" makes systemd-logind set an ACL for the active
+# session immediately (no logout needed); GROUP/MODE are a fallback for setups
+# where uaccess on misc devices does not apply.
+KERNEL=="uinput", SUBSYSTEM=="misc", MODE="0660", GROUP="input", TAG+="uaccess", OPTIONS+="static_node=uinput"

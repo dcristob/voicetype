@@ -1,0 +1,15 @@
+[Unit]
+Description=ydotoold (virtual input backend for VoiceType)
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+# %t is the user runtime dir ($XDG_RUNTIME_DIR). This path is also ydotool's
+# client default, so `ydotool` finds the socket with or without YDOTOOL_SOCKET.
+ExecStart=/usr/bin/ydotoold --socket-path=%t/.ydotool_socket --socket-perm=0660
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target

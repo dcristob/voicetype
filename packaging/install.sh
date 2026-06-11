@@ -2,7 +2,15 @@
 set -euo pipefail
 
 echo "==> Installing voicetype (user)"
-uv tool install --force . || pipx install --force .
+# Install the [cuda] extra (CTranslate2 CUDA runtime libs) when an NVIDIA GPU is
+# present, so the systemd service gets GPU acceleration too. Falls back to CPU
+# at runtime if the GPU can't be used.
+spec="."
+if command -v nvidia-smi >/dev/null 2>&1 || lspci 2>/dev/null | grep -qi nvidia; then
+  echo "    NVIDIA GPU detected -> installing with [cuda] extra"
+  spec=".[cuda]"
+fi
+uv tool install --force "$spec" || pipx install --force "$spec"
 
 echo "==> Installing systemd user units"
 mkdir -p "$HOME/.config/systemd/user"

@@ -29,3 +29,45 @@ class AudioBuffer:
 
     def duration_seconds(self) -> float:
         return sum(len(f) for f in self._frames) / self.sample_rate
+
+
+SILERO_FRAME_SAMPLES = 512
+
+
+class Recorder:
+    """Captures mono 16 kHz audio, delivering 512-sample float32 frames."""
+
+    def __init__(self, mic_device: str | None = None):
+        self.mic_device = mic_device
+        self._stream = None
+        self._buffer = AudioBuffer()
+        self._on_frame: Callable[[np.ndarray], None] | None = None
+
+    def start(self, on_frame: Callable[[np.ndarray], None]) -> None:
+        import sounddevice as sd
+
+        self._on_frame = on_frame
+        self._buffer.clear()
+
+        def callback(indata, frames, time_info, status):  # noqa: ARG001
+            frame = indata[:, 0].copy()
+            self._buffer.add(frame)
+            if self._on_frame is not None:
+                self._on_frame(frame)
+
+        self._stream = sd.InputStream(
+            samplerate=SAMPLE_RATE,
+            channels=1,
+            dtype="float32",
+            blocksize=SILERO_FRAME_SAMPLES,
+            device=self.mic_device,
+            callback=callback,
+        )
+        self._stream.start()
+
+    def stop(self) -> np.ndarray:
+        if self._stream is not None:
+            self._stream.stop()
+            self._stream.close()
+            self._stream = None
+        return self._buffer.get_audio()

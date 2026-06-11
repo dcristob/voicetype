@@ -5,6 +5,14 @@ from voicetype.controller import Controller
 from voicetype.state import State
 
 
+class BoomTranscriber:
+    def ensure_loaded(self):
+        pass
+
+    def transcribe(self, audio, language):
+        raise RuntimeError("kaboom")
+
+
 class FakeRecorder:
     def __init__(self):
         self.started = False
@@ -103,6 +111,26 @@ def test_set_language_forces_language():
     c.toggle()
     c.finish()
     assert tr.calls == ["es"]
+
+
+def test_transcription_failure_is_logged_with_detail(caplog):
+    # The actual exception must be written to the log (journal), not just shown
+    # as an ephemeral notification — otherwise failures are undebuggable.
+    notices = []
+    c = Controller(
+        config=Config(min_speech_seconds=0.1),
+        recorder=FakeRecorder(),
+        vad=FakeVad(),
+        transcriber=BoomTranscriber(),
+        injector=FakeInjector(),
+        notifier=lambda title, body: notices.append((title, body)),
+    )
+    c.toggle()
+    with caplog.at_level("ERROR", logger="voicetype.controller"):
+        c.finish()
+    assert "kaboom" in caplog.text
+    assert notices and notices[0][0] == "Transcription failed"
+    assert c.state is State.IDLE
 
 
 def test_empty_transcription_skips_injection():

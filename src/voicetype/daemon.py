@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import signal
 
@@ -130,6 +131,12 @@ class Daemon:
 
 
 def main() -> None:
+    # systemd captures stdout/stderr into the journal; surface INFO+ there so
+    # transcription/injection failures and GPU->CPU fallbacks are debuggable.
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(name)s %(levelname)s %(message)s",
+    )
     daemon = Daemon()
     try:
         asyncio.run(daemon.run())

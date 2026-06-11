@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock, patch
 
 import numpy as np
+import pytest
 
 from voicetype.asr import Transcriber
 
@@ -78,6 +79,39 @@ def test_unsupported_gpu_compute_downgrades_to_int8_on_gpu():
     assert text == "ok"
     assert tr.device == "cuda"
     assert tr.compute_type == "int8"
+
+
+def test_inference_oom_on_gpu_falls_back_to_cpu():
+    # The model LOADS fine on the GPU but the GPU runs out of memory DURING
+    # inference. _load only tiers at load time, so without an inference-time
+    # safety net this raises straight through as "Transcription failed". We must
+    # reload on CPU int8 and retry the inference once.
+    tr = Transcriber(model="small", device="cuda", compute_type="int8_float16")
+
+    gpu = MagicMock()
+    gpu.transcribe.side_effect = RuntimeError("CUDA failed with error out of memory")
+    cpu = MagicMock()
+    cpu.transcribe.return_value = ([_Seg("recovered")], None)
+
+    def construct(model, *, device, compute_type):
+        return cpu if device == "cpu" else gpu
+
+    with patch("voicetype.asr.WhisperModel", side_effect=construct):
+        text = tr.transcribe(np.zeros(16000, dtype=np.float32), language="auto")
+    assert text == "recovered"
+    assert tr.device == "cpu"
+    assert tr.compute_type == "int8"
+
+
+def test_inference_failure_already_on_cpu_propagates():
+    # When inference fails on CPU there is nowhere lower to fall back to; the
+    # error must surface (so the controller can report it) rather than loop.
+    tr = Transcriber(model="small", device="cpu", compute_type="int8")
+    fake = MagicMock()
+    fake.transcribe.side_effect = RuntimeError("boom")
+    with patch("voicetype.asr.WhisperModel", return_value=fake):
+        with pytest.raises(RuntimeError):
+            tr.transcribe(np.zeros(16000, dtype=np.float32), language="auto")
 
 
 def test_model_constructed_with_keyword_args():

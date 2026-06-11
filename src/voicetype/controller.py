@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Callable
 
 from .config import Config
 from .state import State, StateMachine
 from .vad import SilenceTracker
+
+logger = logging.getLogger(__name__)
 
 FRAME_SECONDS = 512 / 16000  # 0.032 s
 
@@ -87,6 +90,9 @@ class Controller:
         self._sm.transition(State.IDLE)
 
     def _fail(self, title: str, exc: Exception) -> None:
+        # Log the full exception (with traceback) so it lands in the journal —
+        # the notification is ephemeral and otherwise the only record.
+        logger.error("%s: %s", title, exc, exc_info=exc)
         self._sm.transition(State.ERROR)
         self._notify(title, str(exc))
         self._sm.transition(State.IDLE)

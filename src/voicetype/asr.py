@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 from faster_whisper import WhisperModel
+
+logger = logging.getLogger(__name__)
 
 
 class Transcriber:
@@ -49,5 +53,26 @@ class Transcriber:
     def transcribe(self, audio: np.ndarray, language: str) -> str:
         self.ensure_loaded()
         lang = None if language == "auto" else language
+        try:
+            return self._run(audio, lang)
+        except Exception as exc:
+            # _load tiers GPU->CPU only at load time; the GPU can still run out
+            # of memory (or otherwise fail) DURING inference. If that happens,
+            # reload on CPU int8 and retry once. On CPU there is no lower tier,
+            # so re-raise and let the controller report it.
+            if self.device == "cpu":
+                raise
+            logger.warning(
+                "GPU inference failed (%s); reloading on CPU int8 and retrying",
+                exc,
+            )
+            self._model = WhisperModel(
+                self.model_name, device="cpu", compute_type="int8"
+            )
+            self.device = "cpu"
+            self.compute_type = "int8"
+            return self._run(audio, lang)
+
+    def _run(self, audio: np.ndarray, lang: str | None) -> str:
         segments, _info = self._model.transcribe(audio, language=lang)
         return " ".join(seg.text.strip() for seg in segments).strip()

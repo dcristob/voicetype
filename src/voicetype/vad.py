@@ -41,3 +41,25 @@ class SilenceTracker:
             return False
         self._silence_run += self.frame_seconds
         return self._silence_run >= self.silence_seconds
+
+
+# Silero operates on fixed 512-sample frames at 16 kHz.
+SILERO_FRAME_SAMPLES = 512
+SAMPLE_RATE = 16000
+
+
+class SileroVad:
+    """Wraps silero-vad to score a 512-sample frame in [0, 1]."""
+
+    def __init__(self) -> None:
+        import torch  # noqa: F401  (silero pulls torch)
+        from silero_vad import load_silero_vad
+
+        self._model = load_silero_vad()
+
+    def prob(self, frame) -> float:
+        """frame: float32 numpy array of length 512, mono, 16 kHz."""
+        import torch
+
+        tensor = torch.from_numpy(frame)
+        return float(self._model(tensor, SAMPLE_RATE).item())

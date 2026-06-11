@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import signal
 
 from . import ipc
 from .audio import Recorder
@@ -102,15 +103,20 @@ class Daemon:
 
     async def run(self) -> None:
         self._loop = asyncio.get_running_loop()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            self._loop.add_signal_handler(sig, self._stopping.set)
         path = ipc.socket_path()
         if path.exists():
             path.unlink()
         server = await asyncio.start_unix_server(self._handle, path=str(path))
         os.chmod(path, 0o600)
-        self.tray.run_detached()
+        try:
+            await self.tray.setup()
+        except Exception as exc:  # no SNI host available -> run headless
+            notify("VoiceType: tray unavailable", str(exc))
         async with server:
             await self._stopping.wait()
-        self.tray.stop()
+        await self.tray.stop()
         if path.exists():
             path.unlink()
 

@@ -8,7 +8,7 @@ dependencies = [
     "sounddevice>=0.4",
     "numpy>=1.24",
     "silero-vad>=5.1",
-    "pystray>=0.19",
+    "dbus-fast>=2.0",
     "pillow>=10.0",
     "tomli-w>=1.0",
 ]

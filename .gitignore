@@ -4,3 +4,7 @@ __pycache__/
 .pytest_cache/
 dist/
 *.egg-info/
+
+# Local AI/planning artifacts — not part of the published project
+docs/superpowers/
+CLAUDE.md

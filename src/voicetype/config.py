@@ -20,7 +20,12 @@ class Config:
     mic_device: str | None = None
     silence_seconds: float = 2.0
     min_speech_seconds: float = 0.3
-    inject_method: str = "ydotool"
+    inject_method: str = "clipboard"  # clipboard | ydotool
+    paste_shortcut: str = "ctrl+shift+v"  # used by the clipboard injector
+    # Restoring the previous clipboard after paste is racy: a slow app may read
+    # the selection after we've already overwritten it, losing the paste. Off by
+    # default so paste is reliable; enable if clobbering the clipboard bothers you.
+    restore_clipboard: bool = False
 
 
 def load_config(path: Path = CONFIG_PATH) -> Config:

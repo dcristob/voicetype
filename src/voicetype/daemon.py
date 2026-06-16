@@ -12,7 +12,7 @@ from .audio import Recorder
 from .asr import Transcriber
 from .config import load_config
 from .controller import Controller
-from .inject import YdotoolInjector
+from .inject import make_injector
 from .notify import notify
 from .state import State
 from .tray import Tray
@@ -31,7 +31,7 @@ class Daemon:
             transcriber=Transcriber(
                 self.config.model, self.config.device, self.config.compute_type
             ),
-            injector=YdotoolInjector(),
+            injector=make_injector(self.config),
             notifier=notify,
             on_state_change=self._on_state_change,
         )
@@ -46,7 +46,26 @@ class Daemon:
 
     # --- state/tray ---
     def _on_state_change(self, old: State, new: State) -> None:
-        self.tray.set_state(new)
+        # Transitions can fire from a worker thread (complete_transcribe runs in
+        # an executor), so marshal the dbus-fast tray update onto the loop thread.
+        if self._loop is not None:
+            self._loop.call_soon_threadsafe(self.tray.set_state, new)
+        else:
+            self.tray.set_state(new)
+
+    def _finish(self) -> None:
+        # Runs on the loop thread. Do the fast transition (icon -> amber) inline,
+        # then hand the blocking transcribe+inject to a worker thread so the loop
+        # stays free to flush that icon update and answer socket/tray commands.
+        audio = self.controller.begin_transcribe()
+        if audio is None:
+            return
+        if self._loop is not None:
+            self._loop.run_in_executor(
+                None, self.controller.complete_transcribe, audio
+            )
+        else:
+            self.controller.complete_transcribe(audio)
 
     # --- audio frame feeding (runs in the sounddevice thread) ---
     def _on_frame(self, frame) -> None:
@@ -57,7 +76,7 @@ class Daemon:
             return
         if self.controller.feed_frame(frame) and self._loop is not None:
             self._finishing = True
-            self._loop.call_soon_threadsafe(self.controller.finish)
+            self._loop.call_soon_threadsafe(self._finish)
 
     def _start_listening(self) -> None:
         # Re-route the recorder callback through the daemon so frames hit VAD.
@@ -70,7 +89,7 @@ class Daemon:
         if self.controller.state is State.IDLE:
             self._start_listening()
         elif self.controller.state is State.LISTENING:
-            self.controller.finish()
+            self._finish()
 
     def _toggle_from_tray(self) -> None:
         if self._loop is not None:
@@ -93,7 +112,7 @@ class Daemon:
             reply = {"ok": True, "state": self.controller.state.value}
         elif cmd == "stop":
             if self.controller.state is State.LISTENING:
-                self.controller.finish()
+                self._finish()
             reply = {"ok": True, "state": self.controller.state.value}
         elif cmd == "lang":
             self.controller.set_language(msg.get("value", "auto"))

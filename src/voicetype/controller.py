@@ -69,14 +69,42 @@ class Controller:
         return self._tracker.update(self.vad.prob(frame))
 
     def finish(self) -> None:
-        if self._sm.state is not State.LISTENING:
+        """Stop listening, transcribe, and inject — synchronously.
+
+        Composed of ``begin_transcribe`` + ``complete_transcribe`` so the daemon
+        can run the fast state transition on its event loop and hand the blocking
+        transcription off to a worker thread (keeping the loop free to flush the
+        tray icon and answer socket commands). Callers wanting it all in one
+        thread — tests, headless use — just call ``finish()``.
+        """
+        audio = self.begin_transcribe()
+        if audio is None:
             return
+        self.complete_transcribe(audio)
+
+    def begin_transcribe(self):
+        """Transition LISTENING→TRANSCRIBING and return captured audio.
+
+        Fast and non-blocking; meant to run on the daemon's event loop so the
+        amber TRANSCRIBING icon is pushed out immediately. Returns ``None`` if we
+        weren't listening (closing the double-finish race: once we're in
+        TRANSCRIBING any concurrent finish sees the changed state and bails) or if
+        stopping the recorder failed.
+        """
+        if self._sm.state is not State.LISTENING:
+            return None
         self._sm.transition(State.TRANSCRIBING)
-        # recorder.stop() is inside the guarded block so that any failure
-        # (transcription, injection, or even stopping the stream) still routes
-        # the daemon back to IDLE rather than leaving it stuck in TRANSCRIBING.
+        # recorder.stop() is guarded so a failure still routes back to IDLE
+        # rather than leaving the daemon stuck in TRANSCRIBING.
         try:
-            audio = self.recorder.stop()
+            return self.recorder.stop()
+        except Exception as exc:
+            self._fail("Transcription failed", exc)
+            return None
+
+    def complete_transcribe(self, audio) -> None:
+        """Transcribe + inject + return to IDLE. May block; run off the loop."""
+        try:
             text = self.transcriber.transcribe(audio, self.language)
         except Exception as exc:
             self._fail("Transcription failed", exc)

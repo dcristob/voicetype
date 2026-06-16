@@ -12,7 +12,8 @@ def test_defaults():
     assert cfg.mic_device is None
     assert cfg.silence_seconds == 2.0
     assert cfg.min_speech_seconds == 0.3
-    assert cfg.inject_method == "ydotool"
+    assert cfg.inject_method == "clipboard"
+    assert cfg.paste_shortcut == "ctrl+shift+v"
 
 
 def test_load_missing_file_returns_defaults_and_writes(tmp_path):

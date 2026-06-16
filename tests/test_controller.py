@@ -148,6 +148,37 @@ def test_empty_transcription_skips_injection():
     assert c.state is State.IDLE
 
 
+def test_begin_transcribe_enters_transcribing_before_blocking_work():
+    # The daemon runs begin_transcribe() on its event loop (fast) and
+    # complete_transcribe() in a worker thread (slow). begin must already be in
+    # TRANSCRIBING so the amber icon is pushed before transcription blocks.
+    states = []
+    c = Controller(
+        config=Config(min_speech_seconds=0.1),
+        recorder=FakeRecorder(),
+        vad=FakeVad(),
+        transcriber=FakeTranscriber("hi"),
+        injector=FakeInjector(),
+        on_state_change=lambda old, new: states.append(new),
+    )
+    c.toggle()  # listening
+    audio = c.begin_transcribe()
+    assert c.state is State.TRANSCRIBING
+    assert states[-1] is State.TRANSCRIBING
+    assert audio is not None
+    c.complete_transcribe(audio)
+    assert c.state is State.IDLE
+
+
+def test_begin_transcribe_returns_none_when_not_listening():
+    # Guards the double-finish race: a second begin while TRANSCRIBING bails.
+    c = make_controller()
+    assert c.begin_transcribe() is None  # still IDLE
+    c.toggle()
+    c.begin_transcribe()  # -> TRANSCRIBING
+    assert c.begin_transcribe() is None  # no double entry
+
+
 def test_toggle_while_listening_finishes():
     inj = FakeInjector()
     c = Controller(

@@ -26,6 +26,14 @@ if ! command -v ydotoold >/dev/null; then
   echo "    sudo dnf install ydotool    # Fedora"
 fi
 
+echo "==> Checking for wl-clipboard (clipboard injection of Unicode text)"
+if ! command -v wl-copy >/dev/null; then
+  echo "wl-clipboard is not installed. Install it with your package manager, e.g.:"
+  echo "    sudo pacman -S wl-clipboard      # Arch / CachyOS"
+  echo "    sudo apt install wl-clipboard    # Debian / Ubuntu"
+  echo "    sudo dnf install wl-clipboard    # Fedora"
+fi
+
 echo "==> Configuring uinput permission for ydotool (needs sudo)"
 sudo cp packaging/70-uinput.rules /etc/udev/rules.d/70-uinput.rules
 sudo groupadd -f input

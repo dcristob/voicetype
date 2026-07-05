@@ -11,5 +11,8 @@ ExecStart=%h/.local/bin/voicetyped
 Restart=on-failure
 RestartSec=2
 
+# default.target is reached on every login across GNOME/Budgie/COSMIC; some
+# Wayland sessions (e.g. Budgie) never activate graphical-session.target, so
+# anchoring there means the service is never started on boot.
 [Install]
-WantedBy=graphical-session.target
+WantedBy=default.target

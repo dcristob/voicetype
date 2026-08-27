@@ -13,6 +13,7 @@ runtime to derive D-Bus signatures (e.g. ``-> "a(iiay)"``); PEP 563 string-izing
 would corrupt those signatures.
 """
 
+import asyncio
 import os
 from importlib.resources import files
 from typing import Callable
@@ -299,6 +300,7 @@ class Tray:
         self._bus: MessageBus | None = None
         self._sni: _StatusNotifierItem | None = None
         self._menu: _DBusMenu | None = None
+        self._name = ""
 
     def _on_menu_click(self, item_id: int) -> None:
         item = next((i for i in self._menu_items if i["id"] == item_id), None)
@@ -314,18 +316,58 @@ class Tray:
             self._on_quit()
 
     async def setup(self) -> None:
-        """Connect to the session bus, export the item + menu, register."""
+        """Connect to the session bus, export the item + menu, register.
+
+        Registration is resilient to the StatusNotifierWatcher not being up at
+        the moment we start (the common case at login: the daemon is pulled in
+        by default.target before the panel's tray applet owns the watcher name)
+        and to the watcher restarting later. We (re)register on every
+        NameOwnerChanged for the watcher name, so the icon reappears instead of
+        being lost forever after a one-shot boot-time race.
+        """
         self._bus = await MessageBus(bus_type=BusType.SESSION).connect()
         self._sni = _StatusNotifierItem(self)
         self._menu = _DBusMenu(self)
         self._bus.export(SNI_PATH, self._sni)
         self._bus.export(MENU_PATH, self._menu)
-        name = f"org.kde.StatusNotifierItem-{os.getpid()}-1"
-        await self._bus.request_name(name)
-        introspection = await self._bus.introspect(WATCHER_NAME, WATCHER_PATH)
-        obj = self._bus.get_proxy_object(WATCHER_NAME, WATCHER_PATH, introspection)
-        watcher = obj.get_interface(WATCHER_NAME)
-        await watcher.call_register_status_notifier_item(name)
+        self._name = f"org.kde.StatusNotifierItem-{os.getpid()}-1"
+        await self._bus.request_name(self._name)
+        await self._watch_watcher()
+        await self._register()
+
+    async def _watch_watcher(self) -> None:
+        """Re-register whenever the StatusNotifierWatcher (re)appears."""
+        introspection = await self._bus.introspect(
+            "org.freedesktop.DBus", "/org/freedesktop/DBus"
+        )
+        dbus_obj = self._bus.get_proxy_object(
+            "org.freedesktop.DBus", "/org/freedesktop/DBus", introspection
+        )
+        dbus_iface = dbus_obj.get_interface("org.freedesktop.DBus")
+
+        def on_name_owner_changed(name, old_owner, new_owner):
+            # new_owner == "" means the watcher went away; only re-register when
+            # it gains an owner (appeared or restarted).
+            if name == WATCHER_NAME and new_owner:
+                asyncio.ensure_future(self._register())
+
+        dbus_iface.on_name_owner_changed(on_name_owner_changed)
+
+    async def _register(self) -> None:
+        """(Re)register our item with the watcher; a no-op if it is absent.
+
+        Swallows errors so a missing/restarting watcher doesn't crash the
+        daemon — on_name_owner_changed retries once the watcher is back.
+        """
+        if self._bus is None:
+            return
+        try:
+            introspection = await self._bus.introspect(WATCHER_NAME, WATCHER_PATH)
+            obj = self._bus.get_proxy_object(WATCHER_NAME, WATCHER_PATH, introspection)
+            watcher = obj.get_interface(WATCHER_NAME)
+            await watcher.call_register_status_notifier_item(self._name)
+        except Exception:
+            pass
 
     def set_state(self, state: State) -> None:
         self._pixmap = load_pixmap(state)

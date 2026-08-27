@@ -14,12 +14,77 @@ Two strategies:
 
 from __future__ import annotations
 
+import os
+import stat
 import subprocess
 import time
 
 
 class InjectionError(Exception):
     pass
+
+
+def _is_socket(path: str) -> bool:
+    try:
+        return stat.S_ISSOCK(os.stat(path).st_mode)
+    except OSError:
+        return False
+
+
+def _display_socket(runtime_dir: str | None, display: str) -> str | None:
+    """Absolute path of ``display``'s socket, or None if it isn't one.
+
+    Per the Wayland spec WAYLAND_DISPLAY may be an absolute path; otherwise it
+    is relative to XDG_RUNTIME_DIR.
+    """
+    if os.path.isabs(display):
+        path = display
+    elif runtime_dir:
+        path = os.path.join(runtime_dir, display)
+    else:
+        return None
+    return path if _is_socket(path) else None
+
+
+def wayland_env() -> dict[str, str]:
+    """Environment for wl-clipboard, with WAYLAND_DISPLAY resolved for certain.
+
+    systemd starts voicetyped at login (``default.target``), which on COSMIC
+    happens *before* the compositor pushes WAYLAND_DISPLAY into the user
+    manager's environment — so the daemon inherits an environment without it and
+    every wl-copy call dies with "Failed to connect to a Wayland server". We
+    can't fix that by ordering the unit (Budgie never activates
+    graphical-session.target), so don't trust the environment we were launched
+    with: look for the compositor's socket in XDG_RUNTIME_DIR at injection time,
+    by which point it exists.
+    """
+    env = dict(os.environ)
+    runtime_dir = env.get("XDG_RUNTIME_DIR")
+    display = env.get("WAYLAND_DISPLAY")
+    if display and _display_socket(runtime_dir, display):
+        return env
+
+    candidates = []
+    if runtime_dir:
+        try:
+            entries = os.listdir(runtime_dir)
+        except OSError:
+            entries = []
+        candidates = sorted(
+            name
+            for name in entries
+            if name.startswith("wayland-")
+            and not name.endswith(".lock")
+            and _is_socket(os.path.join(runtime_dir, name))
+        )
+    if not candidates:
+        raise InjectionError(
+            "no Wayland display found: WAYLAND_DISPLAY is "
+            f"{display or 'unset'} and no wayland-* socket exists in "
+            f"{runtime_dir or 'XDG_RUNTIME_DIR (unset)'}. Is the compositor running?"
+        )
+    env["WAYLAND_DISPLAY"] = candidates[0]
+    return env
 
 
 class YdotoolInjector:
@@ -91,7 +156,9 @@ class ClipboardInjector:
     def _read_clipboard(self) -> bytes | None:
         try:
             result = subprocess.run(
-                ["wl-paste", "--no-newline"], capture_output=True
+                ["wl-paste", "--no-newline"],
+                capture_output=True,
+                env=wayland_env(),
             )
         except FileNotFoundError as exc:
             raise InjectionError(
@@ -111,6 +178,7 @@ class ClipboardInjector:
                 text=True,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                env=wayland_env(),
             )
         except FileNotFoundError as exc:
             raise InjectionError(
@@ -127,6 +195,7 @@ class ClipboardInjector:
                     input=saved,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
+                    env=wayland_env(),
                 )
             else:
                 subprocess.run(

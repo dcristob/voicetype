@@ -69,7 +69,20 @@ enable the service, bind `voicetype toggle` to a key).
 
 ## Per-desktop hotkey binding
 
-- **COSMIC:** Settings → Keyboard → Custom shortcuts → command `voicetype toggle`.
+Each desktop stores its own shortcuts, so the binding does **not** follow you
+when you switch desktops — rebind it in the new one. Use the **absolute** path
+(`~/.local/bin/voicetype toggle`): a desktop that spawns the command through a
+minimal shell may not have `~/.local/bin` on `PATH`.
+
+- **COSMIC:** Settings → Keyboard → Shortcuts → Custom → command
+  `/home/<you>/.local/bin/voicetype toggle`. Equivalently, add an entry to
+  `~/.config/cosmic/com.system76.CosmicSettings.Shortcuts/v1/custom` — cosmic-comp
+  picks up the file live:
+
+  ```ron
+  (modifiers: [Super], key: "v"): Spawn("/home/<you>/.local/bin/voicetype toggle"),
+  ```
+
 - **Budgie:** Budgie Control Center → Keyboard → custom shortcut → `voicetype toggle`.
 - **GNOME:** Settings → Keyboard → Custom Shortcuts → `voicetype toggle`; enable
   the AppIndicator extension for the tray.

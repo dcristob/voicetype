@@ -1,3 +1,4 @@
+import socket
 from unittest.mock import patch
 
 import pytest
@@ -7,8 +8,39 @@ from voicetype.inject import (
     YdotoolInjector,
     InjectionError,
     make_injector,
+    wayland_env,
 )
 from voicetype.config import Config
+
+
+def _bind(directory, name):
+    """Create a real AF_UNIX socket, the way a compositor does."""
+    sock = socket.socket(socket.AF_UNIX)
+    sock.bind(str(directory / name))
+    return sock
+
+
+@pytest.fixture
+def runtime_dir(tmp_path):
+    """An empty XDG_RUNTIME_DIR, separate from the autouse fixture's socket."""
+    d = tmp_path / "run"
+    d.mkdir()
+    return d
+
+
+@pytest.fixture(autouse=True)
+def fake_wayland_session(tmp_path, monkeypatch):
+    """Run every test as if a compositor socket were present.
+
+    ClipboardInjector resolves the Wayland display from XDG_RUNTIME_DIR at call
+    time; without this the suite would depend on a live compositor. Tests that
+    care about resolution override these env vars in their own body.
+    """
+    sock = _bind(tmp_path, "wayland-0")
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-0")
+    yield tmp_path
+    sock.close()
 
 
 def test_type_text_builds_ydotool_command():
@@ -141,3 +173,88 @@ def test_make_injector_passes_restore_flag():
 def test_make_injector_selects_ydotool():
     cfg = Config(inject_method="ydotool")
     assert isinstance(make_injector(cfg), YdotoolInjector)
+
+
+# --- Wayland display resolution ----------------------------------------
+#
+# systemd starts voicetyped at login, which on COSMIC happens *before* the
+# compositor pushes WAYLAND_DISPLAY into the user manager's environment, so the
+# daemon inherits an environment without it and every wl-copy call fails with
+# "Failed to connect to a Wayland server". Resolve the socket at injection time
+# instead of trusting the environment we were launched with.
+
+
+def test_wayland_env_keeps_display_whose_socket_exists():
+    assert wayland_env()["WAYLAND_DISPLAY"] == "wayland-0"
+
+
+def test_wayland_env_discovers_socket_when_display_is_unset(runtime_dir, monkeypatch):
+    sock = _bind(runtime_dir, "wayland-1")
+    # The compositor also drops a plain lock file next to the socket.
+    (runtime_dir / "wayland-1.lock").write_text("")
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime_dir))
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+    try:
+        assert wayland_env()["WAYLAND_DISPLAY"] == "wayland-1"
+    finally:
+        sock.close()
+
+
+def test_wayland_env_replaces_a_stale_display(runtime_dir, monkeypatch):
+    sock = _bind(runtime_dir, "wayland-1")
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime_dir))
+    monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-7")  # no such socket
+    try:
+        assert wayland_env()["WAYLAND_DISPLAY"] == "wayland-1"
+    finally:
+        sock.close()
+
+
+def test_wayland_env_raises_when_no_compositor_socket(runtime_dir, monkeypatch):
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime_dir))
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+    with pytest.raises(InjectionError, match="Wayland"):
+        wayland_env()
+
+
+def test_clipboard_passes_resolved_display_to_wl_copy(runtime_dir, monkeypatch):
+    sock = _bind(runtime_dir, "wayland-2")
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime_dir))
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+    inj = ClipboardInjector(restore_clipboard=False)
+    calls = []
+
+    def run(cmd, *args, **kwargs):
+        calls.append((cmd, kwargs.get("env")))
+        return _ok()
+
+    try:
+        with patch("voicetype.inject.subprocess.run", side_effect=run):
+            inj.type_text("hola")
+    finally:
+        sock.close()
+
+    cmd, env = next(c for c in calls if c[0][0] == "wl-copy")
+    assert env["WAYLAND_DISPLAY"] == "wayland-2"
+
+
+def test_clipboard_passes_resolved_display_to_wl_paste(runtime_dir, monkeypatch):
+    sock = _bind(runtime_dir, "wayland-2")
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime_dir))
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+    inj = ClipboardInjector(restore_clipboard=True, restore_delay=0)
+    calls = []
+
+    def run(cmd, *args, **kwargs):
+        calls.append((cmd, kwargs.get("env")))
+        return _ok(b"previous" if cmd[0] == "wl-paste" else b"")
+
+    try:
+        with patch("voicetype.inject.subprocess.run", side_effect=run):
+            with patch("voicetype.inject.time.sleep"):
+                inj.type_text("hola")
+    finally:
+        sock.close()
+
+    cmd, env = next(c for c in calls if c[0][0] == "wl-paste")
+    assert env["WAYLAND_DISPLAY"] == "wayland-2"

@@ -6,6 +6,7 @@ import asyncio
 import logging
 import os
 import signal
+import time
 
 from . import ipc
 from .audio import Recorder
@@ -138,6 +139,15 @@ class Daemon:
         await writer.drain()
         writer.close()
 
+    def _warm_up_audio(self) -> None:
+        start = time.monotonic()
+        try:
+            self.recorder.warm_up()
+        except Exception as exc:  # start() will retry and report it properly
+            logger.warning("audio warm-up failed: %s", exc)
+            return
+        logger.info("audio warm-up done in %.1fs", time.monotonic() - start)
+
     async def run(self) -> None:
         self._loop = asyncio.get_running_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):
@@ -147,6 +157,9 @@ class Daemon:
             path.unlink()
         server = await asyncio.start_unix_server(self._handle, path=str(path))
         os.chmod(path, 0o600)
+        # Pay PortAudio's slow init now, in a worker, rather than on the loop
+        # thread during the first toggle.
+        self._loop.run_in_executor(None, self._warm_up_audio)
         try:
             await self.tray.setup()
         except Exception as exc:  # no SNI host available -> run headless

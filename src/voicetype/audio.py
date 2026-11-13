@@ -43,6 +43,18 @@ class Recorder:
         self._buffer = AudioBuffer()
         self._on_frame: Callable[[np.ndarray], None] | None = None
 
+    def warm_up(self) -> None:
+        """Initialise PortAudio ahead of the first recording.
+
+        Importing sounddevice runs Pa_Initialize, which enumerates every audio
+        device and can take several seconds. Done lazily in start() it would
+        freeze the event loop on the first hotkey press after daemon start, and
+        swallow the first words spoken. The daemon calls this off-loop at boot.
+        """
+        import sounddevice as sd
+
+        sd.query_devices()
+
     def start(self, on_frame: Callable[[np.ndarray], None]) -> None:
         import sounddevice as sd
 

@@ -29,3 +29,21 @@ def test_duration_seconds():
     buf = AudioBuffer(sample_rate=16000)
     buf.add(np.zeros(16000, dtype=np.float32))
     assert buf.duration_seconds() == 1.0
+
+
+def test_recorder_warm_up_initialises_sounddevice(monkeypatch):
+    # Importing sounddevice runs Pa_Initialize, which enumerates every audio
+    # device (~6 s here). warm_up() pays that at daemon start, not on the first
+    # hotkey press, by importing it and touching the device list.
+    import sys
+    import types
+
+    calls = []
+    fake = types.ModuleType("sounddevice")
+    fake.query_devices = lambda *a, **k: calls.append("query") or []
+    monkeypatch.setitem(sys.modules, "sounddevice", fake)
+
+    from voicetype.audio import Recorder
+
+    Recorder().warm_up()
+    assert calls == ["query"]

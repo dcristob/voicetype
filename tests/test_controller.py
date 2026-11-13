@@ -192,3 +192,44 @@ def test_toggle_while_listening_finishes():
     c.toggle()  # should finish
     assert inj.typed == ["done"]
     assert c.state is State.IDLE
+
+
+# --- diagnostics: every step must leave a trace in the journal ---------------
+
+
+def test_state_transitions_are_logged(caplog):
+    c = make_controller()
+    with caplog.at_level("INFO", logger="voicetype.controller"):
+        c.toggle()
+        c.finish()
+    assert "idle -> listening" in caplog.text
+    assert "listening -> transcribing" in caplog.text
+    assert "transcribing -> idle" in caplog.text
+
+
+def test_transcription_result_logged_as_length_not_content(caplog):
+    # Dictated text is private; the journal gets its length only.
+    c = make_controller(transcriber=FakeTranscriber("secret words"))
+    with caplog.at_level("INFO", logger="voicetype.controller"):
+        c.toggle()
+        c.finish()
+    assert "12 chars" in caplog.text
+    assert "secret" not in caplog.text
+
+
+def test_empty_transcription_is_logged(caplog):
+    c = make_controller(transcriber=FakeTranscriber(""))
+    with caplog.at_level("INFO", logger="voicetype.controller"):
+        c.toggle()
+        c.finish()
+    assert "empty transcription" in caplog.text
+
+
+def test_toggle_ignored_while_transcribing_is_logged(caplog):
+    c = make_controller()
+    c.toggle()
+    c.begin_transcribe()  # -> TRANSCRIBING
+    with caplog.at_level("INFO", logger="voicetype.controller"):
+        c.toggle()
+    assert c.state is State.TRANSCRIBING
+    assert "ignored" in caplog.text

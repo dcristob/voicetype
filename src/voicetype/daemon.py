@@ -18,6 +18,8 @@ from .state import State
 from .tray import Tray
 from .vad import SileroVad
 
+logger = logging.getLogger(__name__)
+
 
 class Daemon:
     def __init__(self):
@@ -107,6 +109,13 @@ class Daemon:
             return
         msg = ipc.decode(data)
         cmd = msg.get("cmd")
+        # status is polled by tooling; keep it out of the journal at INFO.
+        logger.log(
+            logging.DEBUG if cmd == "status" else logging.INFO,
+            "command %r received in state %s",
+            cmd,
+            self.controller.state.value,
+        )
         if cmd == "toggle":
             self.toggle()
             reply = {"ok": True, "state": self.controller.state.value}

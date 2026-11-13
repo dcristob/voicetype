@@ -258,3 +258,28 @@ def test_clipboard_passes_resolved_display_to_wl_paste(runtime_dir, monkeypatch)
 
     cmd, env = next(c for c in calls if c[0][0] == "wl-paste")
     assert env["WAYLAND_DISPLAY"] == "wayland-2"
+
+
+# --- diagnostics: injection steps are logged (lengths/results, never text) ----
+
+
+def test_clipboard_injection_steps_are_logged_without_text(caplog):
+    inj = ClipboardInjector(restore_clipboard=False)
+    with patch("voicetype.inject.subprocess.run", return_value=_ok()):
+        with caplog.at_level("INFO", logger="voicetype.inject"):
+            inj.type_text("top secret")
+    assert "wl-copy" in caplog.text
+    assert "ydotool key" in caplog.text
+    assert "rc=0" in caplog.text
+    assert "top secret" not in caplog.text
+
+
+def test_paste_logs_ydotool_output(caplog):
+    # ydotool exits 0 even when it can't reach ydotoold, printing the problem
+    # instead; that output must reach the journal.
+    inj = ClipboardInjector(restore_clipboard=False)
+    noisy = _ok(stdout="failed to connect socket")
+    with patch("voicetype.inject.subprocess.run", return_value=noisy):
+        with caplog.at_level("INFO", logger="voicetype.inject"):
+            inj.type_text("x")
+    assert "failed to connect socket" in caplog.text

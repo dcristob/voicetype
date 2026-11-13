@@ -33,12 +33,18 @@ class Controller:
         self.injector = injector
         self.notifier = notifier
         self.language = config.language_default
-        self._sm = StateMachine(on_change=on_state_change)
+        self._on_state_change = on_state_change
+        self._sm = StateMachine(on_change=self._log_and_forward_change)
         self._tracker = SilenceTracker(
             silence_seconds=config.silence_seconds,
             frame_seconds=FRAME_SECONDS,
             min_speech_seconds=config.min_speech_seconds,
         )
+
+    def _log_and_forward_change(self, old: State, new: State) -> None:
+        logger.info("state %s -> %s", old.value, new.value)
+        if self._on_state_change is not None:
+            self._on_state_change(old, new)
 
     @property
     def state(self) -> State:
@@ -52,6 +58,8 @@ class Controller:
             self._start()
         elif self._sm.state is State.LISTENING:
             self.finish()
+        else:
+            logger.info("toggle ignored while %s", self._sm.state.value)
 
     def _start(self) -> None:
         self._tracker.reset()
@@ -110,11 +118,15 @@ class Controller:
             self._fail("Transcription failed", exc)
             return
         if text:
+            # Length only: dictated text is private and stays out of the journal.
+            logger.info("transcribed %d chars; injecting", len(text))
             try:
                 self.injector.type_text(text)
             except Exception as exc:
                 self._fail("Injection failed", exc)
                 return
+        else:
+            logger.info("empty transcription; nothing to inject")
         self._sm.transition(State.IDLE)
 
     def _fail(self, title: str, exc: Exception) -> None:

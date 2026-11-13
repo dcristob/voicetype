@@ -14,10 +14,13 @@ Two strategies:
 
 from __future__ import annotations
 
+import logging
 import os
 import stat
 import subprocess
 import time
+
+logger = logging.getLogger(__name__)
 
 
 class InjectionError(Exception):
@@ -184,6 +187,7 @@ class ClipboardInjector:
             raise InjectionError(
                 "wl-copy not found; install wl-clipboard"
             ) from exc
+        logger.info("wl-copy rc=%d (%d chars)", result.returncode, len(text))
         if result.returncode != 0:
             raise InjectionError("wl-copy failed to set the clipboard")
 
@@ -217,6 +221,17 @@ class ClipboardInjector:
             raise InjectionError(
                 "ydotool not found; is it installed and is ydotoold running?"
             ) from exc
+        # ydotool exits 0 even when it can't reach ydotoold (it just prints the
+        # problem), so always surface its output.
+        output = " ".join(
+            part.strip() for part in (result.stdout, result.stderr) if part and part.strip()
+        )
+        logger.info(
+            "ydotool key %s rc=%d%s",
+            " ".join(self._key_events),
+            result.returncode,
+            f" output: {output}" if output else "",
+        )
         if result.returncode != 0:
             raise InjectionError(f"ydotool failed: {result.stderr.strip()}")
 
